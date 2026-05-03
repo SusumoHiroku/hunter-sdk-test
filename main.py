@@ -1,12 +1,12 @@
-"""Demo script for the Hunter sdk."""
+"""Script for the Hunter SDK."""
 
 import os
 import sys
 
-from hunter_sdk.client import HunterClient
+from hunter_sdk.client import EmailVerificationClient
 from hunter_sdk.exceptions import HunterSDKError
 from hunter_sdk.models import EmailVerificationResult
-from hunter_sdk.service import HunterService
+from hunter_sdk.service import EmailVerificationService
 from hunter_sdk.storage import InMemoryStorage
 
 _DEMO_EMAIL: str = 'tonyplink@gmail.com'
@@ -20,18 +20,18 @@ def _get_api_key() -> str:
     return api_key
 
 
-def _build_service() -> HunterService:
-    """Assemble the service with its dependencies."""
+def _build_service() -> EmailVerificationService:
+    """Assemble the verification service with its dependencies."""
     api_key = _get_api_key()
-    client = HunterClient(api_key=api_key)
+    client = EmailVerificationClient(api_key=api_key)
     storage = InMemoryStorage()
-    return HunterService(client=client, storage=storage)
+    return EmailVerificationService(client=client, storage=storage)
 
 
 def _run_demo() -> EmailVerificationResult:
     """Run the demo verification and return the result."""
     service = _build_service()
-    return service.verify_email(email=_DEMO_EMAIL)
+    return service.verify(email=_DEMO_EMAIL)
 
 
 def _print_result(verification_result: EmailVerificationResult) -> None:

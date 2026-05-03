@@ -1,26 +1,16 @@
-"""HTTP client for the Hunter API v2."""
+"""Endpoint-specific HTTP clients for the Hunter API v2."""
 
 import json
-from typing import (
-    Any,
-    Mapping,
-)
+from typing import Any, Mapping
 
 import httpx
 
-from hunter_sdk.exceptions import (
-    HunterAPIError,
-    HunterRequestError,
-    HunterResponseError,
-)
-from hunter_sdk.models import (
-    DomainSearchResult,
-    EmailFinderResult,
-    EmailVerificationResult,
-)
+from hunter_sdk.exceptions import HunterAPIError, HunterRequestError, HunterResponseError
+from hunter_sdk.models import DomainSearchResult, EmailFinderResult, EmailVerificationResult
 
 _DEFAULT_BASE_URL: str = 'https://api.hunter.io/v2'
 _DEFAULT_TIMEOUT: float = 10.0
+_HTTP_OK: int = 200
 
 _VERIFY_ENDPOINT: str = '/email-verifier'
 _FINDER_ENDPOINT: str = '/email-finder'
@@ -32,8 +22,8 @@ _EMAIL_KEY: str = 'email'
 _LIMIT_KEY: str = 'limit'
 
 
-class HunterClient:
-    """HTTP client for the Hunter API v2."""
+class _BaseHunterClient:
+    """Shared HTTP transport for Hunter API endpoint clients."""
 
     def __init__(
         self,
@@ -41,15 +31,46 @@ class HunterClient:
         base_url: str = _DEFAULT_BASE_URL,
         timeout: float = _DEFAULT_TIMEOUT,
     ) -> None:
-        """Initialize the client with credentials and connection settings."""
+        """Initialize with credentials and connection settings."""
         self._api_key = api_key
         self._base_url = base_url.rstrip('/')
         self._timeout = timeout
 
-    def verify_email(self, email: str) -> EmailVerificationResult:
-        """Verify single email address via email verifier."""
-        response_payload = self._get(_VERIFY_ENDPOINT, {_EMAIL_KEY: email})
-        payload_data: Mapping[str, Any] = response_payload.get(_DATA_KEY, {})
+    def _get(
+        self,
+        path: str,
+        query_params: dict[str, Any],
+    ) -> Mapping[str, Any]:
+        """Execute a GET request and return the parsed JSON payload."""
+        merged_params = {**query_params, 'api_key': self._api_key}
+        try:
+            response = httpx.get(
+                f'{self._base_url}{path}',
+                params=merged_params,
+                timeout=self._timeout,
+            )
+        except httpx.RequestError as exc:
+            raise HunterRequestError(str(exc)) from exc
+
+        if response.status_code != _HTTP_OK:
+            raise HunterAPIError(response.status_code, response.text)
+
+        try:
+            response_payload: Mapping[str, Any] = response.json()
+        except json.JSONDecodeError as exc:
+            raise HunterResponseError('Invalid JSON response') from exc
+
+        return response_payload
+
+
+class EmailVerificationClient(_BaseHunterClient):
+    """Client for the Hunter email verifier endpoint."""
+
+    def verify(self, email: str) -> EmailVerificationResult:
+        """Verify a single email address and return the structured result."""
+        payload_data: Mapping[str, Any] = self._get(
+            _VERIFY_ENDPOINT, {_EMAIL_KEY: email},
+        ).get(_DATA_KEY, {})
         return EmailVerificationResult(
             email=payload_data.get(_EMAIL_KEY, ''),
             status=payload_data.get('status', ''),
@@ -66,20 +87,21 @@ class HunterClient:
             sources=list(payload_data.get('sources', [])),
         )
 
-    def find_email(
+
+class EmailFinderClient(_BaseHunterClient):
+    """Client for the Hunter email finder endpoint."""
+
+    def find(
         self,
         domain: str,
         first_name: str,
         last_name: str,
     ) -> EmailFinderResult:
-        """Find an email address for a person at a given domain."""
-        query_params: dict[str, Any] = {
-            _DOMAIN_KEY: domain,
-            'first_name': first_name,
-            'last_name': last_name,
-        }
-        response_payload = self._get(_FINDER_ENDPOINT, query_params)
-        payload_data: Mapping[str, Any] = response_payload.get(_DATA_KEY, {})
+        """Find an email address for a person at the given domain."""
+        payload_data: Mapping[str, Any] = self._get(
+            _FINDER_ENDPOINT,
+            {_DOMAIN_KEY: domain, 'first_name': first_name, 'last_name': last_name},
+        ).get(_DATA_KEY, {})
         return EmailFinderResult(
             email=payload_data.get(_EMAIL_KEY, ''),
             score=payload_data.get('score', 0),
@@ -90,47 +112,19 @@ class HunterClient:
             sources=list(payload_data.get('sources', [])),
         )
 
-    def search_domain(
-        self,
-        domain: str,
-        limit: int = 10,
-    ) -> DomainSearchResult:
-        """Return list of email addresses found for a domain."""
-        query_params: dict[str, Any] = {
-            _DOMAIN_KEY: domain,
-            _LIMIT_KEY: limit,
-        }
-        response_payload = self._get(_DOMAIN_SEARCH_ENDPOINT, query_params)
-        payload_data: Mapping[str, Any] = response_payload.get(_DATA_KEY, {})
+
+class DomainSearchClient(_BaseHunterClient):
+    """Client for the Hunter domain search endpoint."""
+
+    def search(self, domain: str, limit: int = 10) -> DomainSearchResult:
+        """Return a list of email addresses found for the given domain."""
+        payload_data: Mapping[str, Any] = self._get(
+            _DOMAIN_SEARCH_ENDPOINT,
+            {_DOMAIN_KEY: domain, _LIMIT_KEY: limit},
+        ).get(_DATA_KEY, {})
         return DomainSearchResult(
             domain=payload_data.get(_DOMAIN_KEY, ''),
             organization=payload_data.get('organization', ''),
             total=payload_data.get('total', 0),
             emails=list(payload_data.get('emails', [])),
         )
-
-    def _get(
-        self,
-        path: str,
-        query_params: dict[str, Any],
-    ) -> Mapping[str, Any]:
-        """Execute GET request and return the parsed JSON payload."""
-        merged_params = {**query_params, 'api_key': self._api_key}
-        try:
-            response = httpx.get(
-                f'{self._base_url}{path}',
-                params=merged_params,
-                timeout=self._timeout,
-            )
-        except httpx.RequestError as exc:
-            raise HunterRequestError(str(exc)) from exc
-
-        if response.status_code != 200:  # noqa: WPS432
-            raise HunterAPIError(response.status_code, response.text)
-
-        try:
-            response_payload: Mapping[str, Any] = response.json()
-        except json.JSONDecodeError as exc:
-            raise HunterResponseError('Invalid JSON response') from exc
-
-        return response_payload

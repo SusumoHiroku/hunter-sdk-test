@@ -1,10 +1,7 @@
 """Dataclass models for Hunter API responses."""
 
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Mapping,
-)
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
